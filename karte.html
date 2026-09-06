@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Verkehrsmeldungen – Übersichtskarte</title>
+
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+
+<style>
+  :root{
+    --bg:#12181f; --panel:#1b232c; --border:#2a343f;
+    --text:#e8ecf1; --text-dim:#8b98a5; --accent:#e8a33d;
+  }
+  html,body{margin:0;height:100%;background:var(--bg);color:var(--text);
+    font-family:-apple-system,'Segoe UI',Inter,Roboto,Arial,sans-serif;}
+  #map{position:absolute;top:52px;bottom:0;left:0;right:0;}
+
+  header{
+    height:52px;display:flex;align-items:center;justify-content:space-between;
+    padding:0 16px;background:var(--panel);border-bottom:1px solid var(--border);
+    position:relative;z-index:1000;
+  }
+  header h1{font-size:15px;margin:0;font-weight:600;}
+  header h1 span{color:var(--text-dim);font-weight:400;}
+
+  #legend{
+    position:absolute;bottom:16px;left:16px;z-index:900;background:rgba(27,35,44,.92);
+    border:1px solid var(--border);border-radius:8px;padding:10px 12px;font-size:12px;
+    max-width:220px;
+  }
+  #legend .row{display:flex;align-items:center;gap:7px;margin:3px 0;cursor:pointer;user-select:none;}
+  #legend .dot{width:11px;height:11px;border-radius:50%;flex:none;}
+  #legend label{cursor:pointer;}
+
+  #toggleOld{margin-top:8px;padding-top:8px;border-top:1px solid var(--border);
+    display:flex;align-items:center;gap:6px;font-size:11.5px;color:var(--text-dim);}
+
+  .leaflet-popup-content{font-size:12.5px;line-height:1.5;}
+  .leaflet-popup-content b{color:#000;}
+  #loadingHint{position:absolute;top:60px;left:50%;transform:translateX(-50%);
+    background:var(--panel);border:1px solid var(--border);padding:8px 14px;border-radius:8px;
+    font-size:13px;z-index:900;}
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Verkehrsmeldungen <span>· Übersichtskarte</span></h1>
+  <span id="countInfo" style="font-size:12px;color:var(--text-dim);"></span>
+</header>
+
+<div id="map"></div>
+<div id="loadingHint">Meldungen werden geladen …</div>
+
+<div id="legend"></div>
+
+<script type="module">
+/* Firebase-Konfiguration -- identisch zu eingabe.html, siehe README.md */
+const firebaseConfig = {
+  apiKey: "AIzaSyCK3Q-sl6aR1VkDPyqP_e_mdZU0NlMOoAY",
+  authDomain: "verkehrsmeldungen-1f4e1.firebaseapp.com",
+  projectId: "verkehrsmeldungen-1f4e1",
+  storageBucket: "verkehrsmeldungen-1f4e1.firebasestorage.app",
+  messagingSenderId: "83570069860",
+  appId: "1:83570069860:web:67f860507c11485e5b6a71"
+};
+
+import { initializeApp } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-app.js";
+import { getFirestore, collection, getDocs } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-firestore.js";
+
+const app = initializeApp(firebaseConfig);
+const db = getFirestore(app);
+
+const COLORS = {
+  'Baustelle': '#e8a33d',
+  'Kranarbeiten': '#e2574c',
+  'Straßensperre': '#c94f9c',
+  'Sportveranstaltung': '#4caf7d',
+  'Veranstaltung (Publikumsandrang)': '#5b8def',
+  'Umzug / Aufzug': '#9b6fe0',
+  'Verkehrsmeldung (allgemein)': '#8b98a5'
+};
+
+const map = L.map('map').setView([48.2082, 16.3738], 12);
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  attribution: '&copy; OpenStreetMap-Mitwirkende'
+}).addTo(map);
+
+const layersByArt = {};        // art -> L.layerGroup
+const allEntries = [];
+let showOnlyCurrent = false;
+
+function fmtDate(iso) {
+  if (!iso) return '';
+  const [y,m,d] = iso.split('-');
+  return `${d}.${m}.${y}`;
+}
+
+function popupHtml(d) {
+  const zeitraum = d.datumVon === d.datumBis || !d.datumBis
+    ? fmtDate(d.datumVon)
+    : `${fmtDate(d.datumVon)} – ${fmtDate(d.datumBis)}`;
+  const zeit = d.zeitVon ? `, ${d.zeitVon}${d.zeitBis ? '–' + d.zeitBis : ''} Uhr` : '';
+  return `<b>${d.ort}${d.ortBis ? ' – ' + d.ortBis : ''}</b><br>
+    ${d.art}<br>
+    ${zeitraum}${zeit}<br>
+    ${d.gz ? 'GZ: ' + d.gz + '<br>' : ''}
+    ${d.notiz ? d.notiz + '<br>' : ''}
+    <span style="color:#888;font-size:11px;">Quelle: ${d.quelle || '–'}</span>`;
+}
+
+function isCurrent(d) {
+  if (!d.datumBis) return true;
+  const today = new Date().toISOString().slice(0,10);
+  return d.datumBis >= today;
+}
+
+function addEntry(d) {
+  allEntries.push(d);
+  const color = COLORS[d.art] || COLORS['Verkehrsmeldung (allgemein)'];
+  if (!layersByArt[d.art]) {
+    layersByArt[d.art] = L.layerGroup().addTo(map);
+  }
+  const group = layersByArt[d.art];
+
+  const layers = [];
+  if (d.lat && d.lng) {
+    const m1 = L.circleMarker([d.lat, d.lng], { radius:7, color, fillColor:color, fillOpacity:.85, weight:2 })
+      .bindPopup(popupHtml(d));
+    layers.push(m1);
+  }
+  if (d.lat2 && d.lng2) {
+    const m2 = L.circleMarker([d.lat2, d.lng2], { radius:7, color, fillColor:color, fillOpacity:.85, weight:2 })
+      .bindPopup(popupHtml(d));
+    layers.push(m2);
+    if (d.lat && d.lng) {
+      layers.push(L.polyline([[d.lat,d.lng],[d.lat2,d.lng2]], { color, weight:4, opacity:.75 }));
+    }
+  }
+  layers.forEach(l => { l._meldung = d; group.addLayer(l); });
+}
+
+function applyFilter() {
+  Object.values(layersByArt).flat === undefined; // no-op guard
+  Object.entries(layersByArt).forEach(([art, group]) => {
+    group.eachLayer(l => {
+      const d = l._meldung;
+      const visible = !showOnlyCurrent || isCurrent(d);
+      const onMap = map.hasLayer(l);
+      if (visible && !onMap) group.addLayer(l);
+      if (!visible && onMap) group.removeLayer(l);
+    });
+  });
+}
+
+function buildLegend() {
+  const el = document.getElementById('legend');
+  el.innerHTML = '';
+  Object.keys(COLORS).forEach(art => {
+    if (!layersByArt[art]) return;
+    const row = document.createElement('div');
+    row.className = 'row';
+    row.innerHTML = `<span class="dot" style="background:${COLORS[art]}"></span>
+      <input type="checkbox" checked id="chk_${art}"> <label for="chk_${art}">${art}</label>`;
+    row.querySelector('input').addEventListener('change', (e) => {
+      if (e.target.checked) map.addLayer(layersByArt[art]);
+      else map.removeLayer(layersByArt[art]);
+    });
+    el.appendChild(row);
+  });
+  const toggle = document.createElement('div');
+  toggle.id = 'toggleOld';
+  toggle.innerHTML = `<input type="checkbox" id="chkCurrent"> <label for="chkCurrent">nur aktuelle/kommende anzeigen</label>`;
+  toggle.querySelector('input').addEventListener('change', (e) => {
+    showOnlyCurrent = e.target.checked;
+    applyFilter();
+  });
+  el.appendChild(toggle);
+}
+
+async function load() {
+  const snap = await getDocs(collection(db, 'meldungen'));
+  snap.forEach(doc => addEntry(doc.data()));
+  document.getElementById('loadingHint').style.display = 'none';
+  document.getElementById('countInfo').textContent = allEntries.length + ' Meldungen';
+  buildLegend();
+
+  const allLayers = Object.values(layersByArt);
+  if (allEntries.length) {
+    const group = L.featureGroup(allLayers.flatMap(g => g.getLayers()));
+    if (group.getLayers().length) map.fitBounds(group.getBounds(), { padding:[30,30] });
+  }
+}
+
+load().catch(e => {
+  document.getElementById('loadingHint').textContent = 'Fehler beim Laden: ' + e.message;
+});
+</script>
+</body>
+</html>

@@ -1,0 +1,693 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Verkehrsbescheide erfassen</title>
+
+<!-- ===================== Externe Bibliotheken (kostenlos, per CDN) ===================== -->
+<!-- pdf.js: PDF-Text clientseitig auslesen -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<!-- mammoth.js: DOCX-Text clientseitig auslesen -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js"></script>
+<!-- Leaflet: Kartenvorschau -->
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+
+<style>
+  :root{
+    --bg:#12181f;
+    --panel:#1b232c;
+    --panel-2:#212b35;
+    --border:#2a343f;
+    --text:#e8ecf1;
+    --text-dim:#8b98a5;
+    --accent:#e8a33d;
+    --accent-dim:#5c471f;
+    --ok:#4caf7d;
+    --err:#e2574c;
+    --mono:'JetBrains Mono', 'SFMono-Regular', Consolas, monospace;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;background:var(--bg);color:var(--text);
+    font-family:-apple-system,'Segoe UI',Inter,Roboto,Arial,sans-serif;font-size:14px;}
+  a{color:var(--accent);}
+
+  header{
+    display:flex;align-items:center;justify-content:space-between;
+    padding:14px 22px;background:var(--panel);border-bottom:1px solid var(--border);
+    position:sticky;top:0;z-index:20;flex-wrap:wrap;gap:10px;
+  }
+  header h1{font-size:16px;margin:0;font-weight:600;letter-spacing:.2px;}
+  header h1 span{color:var(--text-dim);font-weight:400;}
+
+  #authBox{display:flex;align-items:center;gap:8px;font-size:13px;}
+  #authBox input{background:var(--panel-2);border:1px solid var(--border);color:var(--text);
+    padding:6px 9px;border-radius:6px;font-size:13px;width:150px;}
+  button{
+    background:var(--accent);color:#241b06;border:none;border-radius:6px;
+    padding:7px 14px;font-size:13px;font-weight:600;cursor:pointer;
+  }
+  button.secondary{background:var(--panel-2);color:var(--text);border:1px solid var(--border);}
+  button.danger{background:var(--err);color:#fff;}
+  button:disabled{opacity:.45;cursor:not-allowed;}
+  #authStatus{color:var(--text-dim);}
+
+  main{display:grid;grid-template-columns:360px 1fr;gap:0;min-height:calc(100vh - 58px);}
+  @media (max-width:860px){ main{grid-template-columns:1fr;} }
+
+  .col{padding:18px;border-right:1px solid var(--border);}
+  main > .col:last-child{border-right:none;}
+
+  .dropzone{
+    border:2px dashed var(--border);border-radius:10px;padding:26px 14px;text-align:center;
+    color:var(--text-dim);cursor:pointer;transition:.15s;
+  }
+  .dropzone.drag{border-color:var(--accent);color:var(--accent);background:rgba(232,163,61,.06);}
+  .dropzone small{display:block;margin-top:6px;}
+
+  #queue{list-style:none;margin:16px 0 0;padding:0;display:flex;flex-direction:column;gap:8px;}
+  #queue li{
+    background:var(--panel);border:1px solid var(--border);border-radius:8px;
+    padding:10px 12px;cursor:pointer;font-size:12.5px;
+  }
+  #queue li.active{border-color:var(--accent);}
+  #queue li .fname{font-weight:600;word-break:break-all;}
+  #queue li .status{display:inline-block;margin-top:4px;padding:2px 7px;border-radius:20px;
+    font-size:11px;font-weight:600;}
+  .status.parsing{background:var(--accent-dim);color:var(--accent);}
+  .status.ready{background:#1f3a2c;color:var(--ok);}
+  .status.saved{background:#123a2a;color:var(--ok);}
+  .status.error{background:#3a1f1f;color:var(--err);}
+
+  h2{font-size:14px;text-transform:none;color:var(--text);margin:0 0 12px;}
+  .empty-hint{color:var(--text-dim);padding:40px 10px;text-align:center;}
+
+  .field{margin-bottom:12px;}
+  .field label{display:block;font-size:12px;color:var(--text-dim);margin-bottom:4px;}
+  .field input, .field select, .field textarea{
+    width:100%;background:var(--panel-2);border:1px solid var(--border);color:var(--text);
+    padding:8px 10px;border-radius:6px;font-size:13.5px;font-family:inherit;
+  }
+  .field input[readonly]{color:var(--text-dim);}
+  .row2{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
+  .gz-mono{font-family:var(--mono);}
+
+  #previewMap{height:260px;border-radius:8px;margin:10px 0 6px;border:1px solid var(--border);}
+  .map-hint{font-size:11.5px;color:var(--text-dim);margin-bottom:14px;}
+
+  details{margin-top:16px;border:1px solid var(--border);border-radius:8px;overflow:hidden;}
+  details summary{padding:9px 12px;cursor:pointer;background:var(--panel);font-size:12.5px;color:var(--text-dim);}
+  details .rawtext{white-space:pre-wrap;padding:12px;font-family:var(--mono);font-size:11.5px;
+    color:var(--text-dim);max-height:260px;overflow:auto;background:var(--bg);}
+
+  .actions{display:flex;gap:10px;margin-top:16px;}
+  .badge-info{font-size:11.5px;color:var(--text-dim);margin-top:2px;}
+  .toast{position:fixed;bottom:20px;right:20px;background:var(--panel);border:1px solid var(--border);
+    padding:10px 16px;border-radius:8px;font-size:13px;z-index:50;box-shadow:0 6px 20px rgba(0,0,0,.4);}
+  .toast.err{border-color:var(--err);color:var(--err);}
+  .toast.ok{border-color:var(--ok);color:var(--ok);}
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Verkehrsbescheide erfassen <span>· Übersichtskarte-Eingabe</span></h1>
+  <div id="authBox">
+    <span id="authStatus">nicht angemeldet</span>
+    <span id="loginForm">
+      <input id="loginEmail" type="email" placeholder="E-Mail">
+      <input id="loginPw" type="password" placeholder="Passwort">
+      <button id="loginBtn">Anmelden</button>
+    </span>
+    <button id="logoutBtn" class="secondary" style="display:none;">Abmelden</button>
+  </div>
+</header>
+
+<main>
+  <div class="col">
+    <div id="dropzone" class="dropzone">
+      Dateien hierher ziehen oder klicken<br>
+      <small>PDF, DOCX oder Outlook-E-Mail (.msg)</small>
+      <input id="fileInput" type="file" accept=".pdf,.docx,.msg" multiple style="display:none">
+    </div>
+    <ul id="queue"></ul>
+  </div>
+
+  <div class="col" id="reviewCol">
+    <div class="empty-hint" id="emptyHint">Noch keine Datei ausgewählt.<br>Links eine Datei hochladen oder aus der Liste wählen.</div>
+
+    <div id="reviewForm" style="display:none;">
+      <h2 id="reviewTitle">Prüfen &amp; korrigieren</h2>
+
+      <div class="field">
+        <label>Ort / Straße</label>
+        <input id="fOrt" type="text" placeholder="z. B. Apollogasse, 1070 Wien">
+      </div>
+      <div class="field">
+        <label>Bis (nur bei Streckenabschnitt, sonst leer lassen)</label>
+        <input id="fOrtBis" type="text" placeholder="z. B. Kaiserstraße, 1070 Wien">
+      </div>
+
+      <div class="row2">
+        <div class="field">
+          <label>Datum von</label>
+          <input id="fDatumVon" type="date">
+        </div>
+        <div class="field">
+          <label>Datum bis</label>
+          <input id="fDatumBis" type="date">
+        </div>
+      </div>
+      <div class="row2">
+        <div class="field">
+          <label>Uhrzeit von (optional)</label>
+          <input id="fZeitVon" type="time">
+        </div>
+        <div class="field">
+          <label>Uhrzeit bis (optional)</label>
+          <input id="fZeitBis" type="time">
+        </div>
+      </div>
+
+      <div class="row2">
+        <div class="field">
+          <label>Art der Meldung</label>
+          <select id="fArt">
+            <option>Baustelle</option>
+            <option>Kranarbeiten</option>
+            <option>Straßensperre</option>
+            <option>Sportveranstaltung</option>
+            <option>Veranstaltung (Publikumsandrang)</option>
+            <option>Umzug / Aufzug</option>
+            <option>Verkehrsmeldung (allgemein)</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>Geschäftszahl / Aktenzahl</label>
+          <input id="fGz" type="text" class="gz-mono" placeholder="z. B. MA 46/P90 (940126-2026)">
+        </div>
+      </div>
+
+      <div class="field">
+        <label>Notiz (optional)</label>
+        <textarea id="fNotiz" rows="2"></textarea>
+      </div>
+
+      <button id="geocodeBtn" class="secondary">📍 Adresse(n) suchen</button>
+      <div id="previewMap"></div>
+      <div class="map-hint">Marker lassen sich zur Korrektur verschieben. Adresssuche über OpenStreetMap Nominatim.</div>
+
+      <div class="actions">
+        <button id="saveBtn">Speichern</button>
+        <button id="discardBtn" class="danger">Verwerfen</button>
+      </div>
+
+      <details>
+        <summary>Erkannter Originaltext anzeigen</summary>
+        <div class="rawtext" id="rawTextBox"></div>
+      </details>
+    </div>
+  </div>
+</main>
+
+<script>
+  // pdf.js Worker (muss zur oben geladenen Version passen)
+  pdfjsLib.GlobalWorkerOptions.workerSrc =
+    "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+</script>
+
+<script type="module">
+/* ======================================================================
+   FIREBASE-KONFIGURATION
+   Hier die Konfiguration aus der eigenen Firebase-Console eintragen
+   (Projekteinstellungen -> Meine Apps -> SDK-Setup und Konfiguration).
+   Siehe README.md für die Schritt-für-Schritt-Anleitung.
+   ====================================================================== */
+const firebaseConfig = {
+  apiKey: "AIzaSyCK3Q-sl6aR1VkDPyqP_e_mdZU0NlMOoAY",
+  authDomain: "verkehrsmeldungen-1f4e1.firebaseapp.com",
+  projectId: "verkehrsmeldungen-1f4e1",
+  storageBucket: "verkehrsmeldungen-1f4e1.firebasestorage.app",
+  messagingSenderId: "83570069860",
+  appId: "1:83570069860:web:67f860507c11485e5b6a71"
+};
+
+import { initializeApp } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-app.js";
+import {
+  getAuth, signInWithEmailAndPassword, signOut, onAuthStateChanged
+} from "https://www.gstatic.com/firebasejs/12.18.0/firebase-auth.js";
+import {
+  getFirestore, collection, addDoc, serverTimestamp
+} from "https://www.gstatic.com/firebasejs/12.18.0/firebase-firestore.js";
+
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = getFirestore(app);
+
+// ---------------------------------------------------------------------
+// Auth-UI
+// ---------------------------------------------------------------------
+const authStatus = document.getElementById('authStatus');
+const loginForm  = document.getElementById('loginForm');
+const logoutBtn  = document.getElementById('logoutBtn');
+const saveBtn    = document.getElementById('saveBtn');
+
+let currentUser = null;
+
+onAuthStateChanged(auth, (user) => {
+  currentUser = user;
+  if (user) {
+    authStatus.textContent = user.email;
+    loginForm.style.display = 'none';
+    logoutBtn.style.display = 'inline-block';
+  } else {
+    authStatus.textContent = 'nicht angemeldet';
+    loginForm.style.display = 'inline-block';
+    logoutBtn.style.display = 'none';
+  }
+  saveBtn.disabled = !user;
+});
+
+document.getElementById('loginBtn').addEventListener('click', async () => {
+  const email = document.getElementById('loginEmail').value.trim();
+  const pw = document.getElementById('loginPw').value;
+  try {
+    await signInWithEmailAndPassword(auth, email, pw);
+  } catch (e) {
+    toast('Anmeldung fehlgeschlagen: ' + e.message, true);
+  }
+});
+logoutBtn.addEventListener('click', () => signOut(auth));
+
+// ---------------------------------------------------------------------
+// Kleine Toast-Meldung
+// ---------------------------------------------------------------------
+function toast(msg, isErr) {
+  const t = document.createElement('div');
+  t.className = 'toast ' + (isErr ? 'err' : 'ok');
+  t.textContent = msg;
+  document.body.appendChild(t);
+  setTimeout(() => t.remove(), 4200);
+}
+
+// ---------------------------------------------------------------------
+// Datei-Queue
+// ---------------------------------------------------------------------
+const queue = [];      // { id, file, status, subject, bodyText, extracted, geo, rawText }
+let activeId = null;
+
+const dropzone  = document.getElementById('dropzone');
+const fileInput = document.getElementById('fileInput');
+const queueEl   = document.getElementById('queue');
+
+dropzone.addEventListener('click', () => fileInput.click());
+['dragenter','dragover'].forEach(ev =>
+  dropzone.addEventListener(ev, e => { e.preventDefault(); dropzone.classList.add('drag'); }));
+['dragleave','drop'].forEach(ev =>
+  dropzone.addEventListener(ev, e => { e.preventDefault(); dropzone.classList.remove('drag'); }));
+dropzone.addEventListener('drop', e => handleFiles(e.dataTransfer.files));
+fileInput.addEventListener('change', e => handleFiles(e.target.files));
+
+function handleFiles(fileList) {
+  [...fileList].forEach(file => {
+    const id = crypto.randomUUID();
+    const item = { id, file, status: 'parsing', subject:'', bodyText:'', extracted:null, geo:null, rawText:'' };
+    queue.push(item);
+    renderQueue();
+    processFile(item);
+  });
+}
+
+function renderQueue() {
+  queueEl.innerHTML = '';
+  queue.forEach(item => {
+    const li = document.createElement('li');
+    li.className = item.id === activeId ? 'active' : '';
+    li.innerHTML = `<div class="fname">${item.file.name}</div>
+      <span class="status ${item.status}">${statusLabel(item.status)}</span>`;
+    li.addEventListener('click', () => selectItem(item.id));
+    queueEl.appendChild(li);
+  });
+}
+function statusLabel(s) {
+  return { parsing:'wird gelesen …', ready:'bereit zur Prüfung', saved:'gespeichert', error:'Fehler' }[s] || s;
+}
+
+// ---------------------------------------------------------------------
+// Datei-Verarbeitung: Text je nach Typ extrahieren
+// ---------------------------------------------------------------------
+async function processFile(item) {
+  try {
+    const name = item.file.name.toLowerCase();
+    const buf = await item.file.arrayBuffer();
+
+    if (name.endsWith('.pdf')) {
+      item.bodyText = await extractTextFromPdf(buf);
+    } else if (name.endsWith('.docx')) {
+      const result = await mammoth.extractRawText({ arrayBuffer: buf });
+      item.bodyText = result.value;
+    } else if (name.endsWith('.msg')) {
+      const parsed = await extractFromMsg(buf);
+      item.subject = parsed.subject || '';
+      item.bodyText = parsed.body || '';
+      // eingebettete PDF-Anhänge zusätzlich durchsuchen
+      for (const att of parsed.pdfAttachments) {
+        try {
+          item.bodyText += '\n\n[Anhang: ' + att.name + ']\n' + await extractTextFromPdf(att.data.buffer);
+        } catch (e) { /* Anhang konnte nicht gelesen werden, wird ignoriert */ }
+      }
+    } else {
+      throw new Error('Nicht unterstützter Dateityp');
+    }
+
+    item.rawText = (item.subject ? 'Betreff: ' + item.subject + '\n\n' : '') + item.bodyText;
+    item.extracted = extractFields(item.subject, item.bodyText);
+    item.status = 'ready';
+  } catch (e) {
+    console.error(e);
+    item.status = 'error';
+    item.error = e.message;
+  }
+  renderQueue();
+  if (item.id === activeId) fillForm(item);
+  if (!activeId && item.status === 'ready') selectItem(item.id);
+}
+
+async function extractTextFromPdf(arrayBuffer) {
+  const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+  let text = '';
+  for (let p = 1; p <= pdf.numPages; p++) {
+    const page = await pdf.getPage(p);
+    const content = await page.getTextContent();
+    text += content.items.map(i => i.str).join(' ') + '\n';
+  }
+  return text;
+}
+
+async function extractFromMsg(arrayBuffer) {
+  // @kenjiuno/msgreader wird per esm.sh geladen (Node-Paket, im Browser
+  // per esm.sh gebündelt bereitgestellt) -- siehe README für Details.
+  const { default: MsgReader } = await import('https://esm.sh/@kenjiuno/msgreader@1.28.0');
+  const reader = new MsgReader(new Uint8Array(arrayBuffer));
+  const data = reader.getFileData();
+  const pdfAttachments = [];
+  (data.attachments || []).forEach((att, idx) => {
+    const fname = (att.fileName || att.name || '').toLowerCase();
+    if (fname.endsWith('.pdf')) {
+      const attData = reader.getAttachment(idx);
+      pdfAttachments.push({ name: att.fileName || att.name, data: attData.content });
+    }
+  });
+  return { subject: data.subject, body: data.body || data.bodyHTML || '', pdfAttachments };
+}
+
+// ---------------------------------------------------------------------
+// Feld-Extraktion (Regex-Heuristiken) -- siehe README, Abschnitt
+// "Wie die Extraktion funktioniert" für Hintergrund je Behörde/Quelle.
+// Alle Treffer sind bewusst nur ERSTE VORSCHLÄGE, die im Formular
+// geprüft/korrigiert werden.
+// ---------------------------------------------------------------------
+
+const MONTHS = {
+  'jänner':1,'januar':1,'februar':2,'märz':3,'april':4,'mai':5,'juni':6,
+  'juli':7,'august':8,'september':9,'oktober':10,'november':11,'dezember':12
+};
+
+function toIso(d, m, y) {
+  return `${y}-${String(m).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+}
+
+function extractFields(subject, body) {
+  const text = (subject ? subject + '\n' : '') + body;
+  return {
+    gz: extractGz(text),
+    ...extractDates(text),
+    ort: extractOrt(subject, text),
+    ortBis: extractOrtBis(text),
+    art: extractArt(text)
+  };
+}
+
+function extractGz(text) {
+  const patterns = [
+    /MA\s?46[\/\s]?P90\s*\/?\s*\(?(\d{5,7}-\d{4})\)?[\/A-Z]*/i,
+    /GZ\s?MA\s?46\/P90\/?\s?\(?(\d{5,7}-\d{4})\)?[\/A-Z]*/i,
+    /PAD\/\d{2}\/\d{6,8}/i,
+    /(?:Geschäftszahl|GZ|Zl\.|Aktenzahl)[:\s]*([A-Z0-9][A-Z0-9\/\-\.\(\) ]{4,40})/i
+  ];
+  for (const re of patterns) {
+    const m = text.match(re);
+    if (m) return m[0].replace(/\s+/g, ' ').trim();
+  }
+  return '';
+}
+
+function extractDates(text) {
+  const out = { datumVon:'', datumBis:'', zeitVon:'', zeitBis:'' };
+
+  // Fall 1: "DD.MM.YYYY bis [einschließlich] DD.MM.YYYY"
+  let m = text.match(/(\d{1,2})\.(\d{1,2})\.(\d{4})\s*(?:bis|-|–)\s*(?:einschließlich\s*)?(\d{1,2})\.(\d{1,2})\.(\d{4})/i);
+  if (m) {
+    out.datumVon = toIso(+m[1], +m[2], +m[3]);
+    out.datumBis = toIso(+m[4], +m[5], +m[6]);
+  } else {
+    // Fall 2: "DD. Monatsname YYYY" (z.B. LPD-Bescheide)
+    m = text.match(/(\d{1,2})\.\s*(Jänner|Januar|Februar|März|April|Mai|Juni|Juli|August|September|Oktober|November|Dezember)\s*(\d{4})/i);
+    if (m) {
+      const mon = MONTHS[m[2].toLowerCase()];
+      out.datumVon = toIso(+m[1], mon, +m[3]);
+      out.datumBis = out.datumVon;
+    } else {
+      // Fall 3: einzelnes Datum DD.MM.YYYY (z.B. reine Tagesmeldung)
+      m = text.match(/(\d{1,2})\.(\d{1,2})\.(\d{4})/);
+      if (m) {
+        out.datumVon = toIso(+m[1], +m[2], +m[3]);
+        out.datumBis = out.datumVon;
+      }
+    }
+  }
+
+  // Uhrzeiten "von HH:MM Uhr bis [ca.] HH:MM Uhr"
+  const t = text.match(/von\s*(\d{1,2})[:\.](\d{2})\s*Uhr\s*bis\s*(?:ca\.?\s*)?(\d{1,2})[:\.](\d{2})\s*Uhr/i);
+  if (t) {
+    out.zeitVon = `${t[1].padStart(2,'0')}:${t[2]}`;
+    out.zeitBis = `${t[3].padStart(2,'0')}:${t[4]}`;
+  }
+  return out;
+}
+
+function extractOrt(subject, text) {
+  const patterns = [
+    // "Apollogasse von Kreuzung Stollgasse bis Kreuzung Kaiserstraße"
+    /([A-ZÄÖÜ][\wäöüßÄÖÜ.\-]+(?:straße|gasse|platz|allee|weg|ring|zeile|promenade|brücke))\s+von\s+Kreuzung\s+[\wäöüßÄÖÜ.\-]+\s+bis\s+Kreuzung\s+[\wäöüßÄÖÜ.\-]+/i,
+    // "Helblinggasse zwischen Geblergasse und Ottakringer Straße, 1170 Wien"
+    /([A-ZÄÖÜ][\wäöüßÄÖÜ.\-]+(?:straße|gasse|platz|allee|weg|ring|zeile|promenade))\s+zwischen\s+[\wäöüßÄÖÜ.\- ]+?\s+und\s+[\wäöüßÄÖÜ.\- ]+/i,
+    // "Bezirk., Straße" Kopfzeile, z.B. "7. Bez., Apollogasse"
+    /\d{1,2}\.\s*Bez\.,\s*([A-ZÄÖÜ][\wäöüßÄÖÜ.\- ]+)/,
+    // "Wien 22., Maria-Trapp-Platz"
+    /Wien\s+\d{1,2}\.,?\s*([A-ZÄÖÜ][\wäöüßÄÖÜ.\- ]+?)(?:[.,\n]|$)/,
+    // Straße mit Hausnummer + PLZ, typ. Betreffzeile: "Haeckelstraße 13, 1230 Wien"
+    /([A-ZÄÖÜ][\wäöüßÄÖÜ.\-]+(?:straße|gasse|platz|allee|weg|ring|zeile))\s*\d{1,4}[a-z]?(?:-\d{1,4})?,?\s*\d{4}\s*Wien/i,
+    // Straßenname allgemein, irgendwo im Betreff
+    /([A-ZÄÖÜ][\wäöüßÄÖÜ.\-]+(?:straße|gasse|platz|allee|weg|ring|zeile|promenade))/
+  ];
+  for (const re of patterns) {
+    const m = text.match(re) || (subject && subject.match(re));
+    if (m) return m[0].replace(/\s+/g, ' ').trim();
+  }
+  return '';
+}
+
+function extractOrtBis(text) {
+  const m = text.match(/(?:bis|und)\s+(?:Kreuzung\s+)?([A-ZÄÖÜ][\wäöüßÄÖÜ.\-]+(?:straße|gasse|platz|allee|weg|ring|zeile))/i);
+  return m ? m[1].trim() : '';
+}
+
+function extractArt(text) {
+  const map = [
+    [/kranarbeiten|mobilkran|hebearbeiten/i, 'Kranarbeiten'],
+    [/straßenbau|gleissanierung|umbau|kanalbau|bauarbeiten/i, 'Baustelle'],
+    [/lauf|marathon|sportliche veranstaltung|bewerb|nordic walker/i, 'Sportveranstaltung'],
+    [/festival|zuschauer|konzert/i, 'Veranstaltung (Publikumsandrang)'],
+    [/umzug|aufzug/i, 'Umzug / Aufzug'],
+    [/straßensperre|gesperrt|sperre/i, 'Straßensperre']
+  ];
+  for (const [re, label] of map) if (re.test(text)) return label;
+  return 'Verkehrsmeldung (allgemein)';
+}
+
+// ---------------------------------------------------------------------
+// Formular füllen / auswählen
+// ---------------------------------------------------------------------
+const emptyHint  = document.getElementById('emptyHint');
+const reviewForm = document.getElementById('reviewForm');
+const reviewTitle= document.getElementById('reviewTitle');
+
+function selectItem(id) {
+  activeId = id;
+  renderQueue();
+  const item = queue.find(i => i.id === id);
+  if (!item) return;
+  if (item.status === 'parsing') {
+    emptyHint.style.display = 'block';
+    emptyHint.textContent = 'Datei wird noch gelesen …';
+    reviewForm.style.display = 'none';
+    return;
+  }
+  if (item.status === 'error') {
+    emptyHint.style.display = 'block';
+    emptyHint.textContent = 'Fehler beim Lesen: ' + (item.error || 'unbekannt');
+    reviewForm.style.display = 'none';
+    return;
+  }
+  fillForm(item);
+}
+
+function fillForm(item) {
+  emptyHint.style.display = 'none';
+  reviewForm.style.display = 'block';
+  reviewTitle.textContent = 'Prüfen & korrigieren – ' + item.file.name;
+
+  const ex = item.extracted || {};
+  document.getElementById('fOrt').value = ex.ort || '';
+  document.getElementById('fOrtBis').value = ex.ortBis || '';
+  document.getElementById('fDatumVon').value = ex.datumVon || '';
+  document.getElementById('fDatumBis').value = ex.datumBis || '';
+  document.getElementById('fZeitVon').value = ex.zeitVon || '';
+  document.getElementById('fZeitBis').value = ex.zeitBis || '';
+  document.getElementById('fArt').value = ex.art || 'Verkehrsmeldung (allgemein)';
+  document.getElementById('fGz').value = ex.gz || '';
+  document.getElementById('fNotiz').value = '';
+  document.getElementById('rawTextBox').textContent = item.rawText || '(kein Text erkannt)';
+
+  resetPreviewMap();
+  item.geo = null;
+}
+
+// ---------------------------------------------------------------------
+// Kartenvorschau + Geocoding (Nominatim / OpenStreetMap, kostenlos)
+// ---------------------------------------------------------------------
+let map, markerA, markerB, line;
+
+function resetPreviewMap() {
+  if (!map) {
+    map = L.map('previewMap').setView([48.2082, 16.3738], 12); // Wien
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '&copy; OpenStreetMap-Mitwirkende'
+    }).addTo(map);
+  }
+  if (markerA) { map.removeLayer(markerA); markerA = null; }
+  if (markerB) { map.removeLayer(markerB); markerB = null; }
+  if (line)    { map.removeLayer(line); line = null; }
+  map.setView([48.2082, 16.3738], 12);
+}
+
+async function nominatimSearch(query) {
+  const url = `https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=at&q=${encodeURIComponent(query)}`;
+  const res = await fetch(url);
+  const data = await res.json();
+  if (!data.length) return null;
+  return { lat: parseFloat(data[0].lat), lng: parseFloat(data[0].lon) };
+}
+
+let lastGeocodeAt = 0;
+async function throttledGeocode(query) {
+  // Nominatim-Nutzungsbedingungen: max. 1 Anfrage/Sekunde
+  const wait = Math.max(0, 1100 - (Date.now() - lastGeocodeAt));
+  if (wait > 0) await new Promise(r => setTimeout(r, wait));
+  lastGeocodeAt = Date.now();
+  return nominatimSearch(query);
+}
+
+document.getElementById('geocodeBtn').addEventListener('click', async () => {
+  const ort = document.getElementById('fOrt').value.trim();
+  const ortBis = document.getElementById('fOrtBis').value.trim();
+  if (!ort) { toast('Bitte zuerst einen Ort eintragen.', true); return; }
+
+  resetPreviewMap();
+  const btn = document.getElementById('geocodeBtn');
+  btn.disabled = true; btn.textContent = 'Suche läuft …';
+  try {
+    const a = await throttledGeocode(ort + ', Wien, Österreich');
+    if (a) {
+      markerA = L.marker([a.lat, a.lng], { draggable: true }).addTo(map).bindPopup('Start: ' + ort);
+      map.setView([a.lat, a.lng], 16);
+    } else {
+      toast('Ort "' + ort + '" nicht gefunden. Bitte Marker manuell auf der Karte setzen ist hier nicht möglich – Text präzisieren.', true);
+    }
+    if (ortBis) {
+      const b = await throttledGeocode(ortBis + ', Wien, Österreich');
+      if (b) {
+        markerB = L.marker([b.lat, b.lng], { draggable: true }).addTo(map).bindPopup('Bis: ' + ortBis);
+        if (a) {
+          line = L.polyline([[a.lat,a.lng],[b.lat,b.lng]], { color:'#e8a33d' }).addTo(map);
+          map.fitBounds(line.getBounds(), { padding:[20,20] });
+        }
+      }
+    }
+  } catch (e) {
+    toast('Geocoding fehlgeschlagen: ' + e.message, true);
+  }
+  btn.disabled = false; btn.textContent = '📍 Adresse(n) suchen';
+});
+
+// ---------------------------------------------------------------------
+// Speichern / Verwerfen
+// ---------------------------------------------------------------------
+document.getElementById('discardBtn').addEventListener('click', () => {
+  const idx = queue.findIndex(i => i.id === activeId);
+  if (idx > -1) queue.splice(idx, 1);
+  activeId = null;
+  reviewForm.style.display = 'none';
+  emptyHint.style.display = 'block';
+  emptyHint.textContent = 'Noch keine Datei ausgewählt.';
+  renderQueue();
+});
+
+saveBtn.addEventListener('click', async () => {
+  if (!currentUser) { toast('Bitte zuerst anmelden.', true); return; }
+  const item = queue.find(i => i.id === activeId);
+  if (!item) return;
+
+  const ort = document.getElementById('fOrt').value.trim();
+  if (!ort) { toast('Bitte einen Ort angeben.', true); return; }
+
+  const payload = {
+    ort,
+    ortBis: document.getElementById('fOrtBis').value.trim(),
+    datumVon: document.getElementById('fDatumVon').value,
+    datumBis: document.getElementById('fDatumBis').value,
+    zeitVon: document.getElementById('fZeitVon').value,
+    zeitBis: document.getElementById('fZeitBis').value,
+    art: document.getElementById('fArt').value,
+    gz: document.getElementById('fGz').value.trim(),
+    notiz: document.getElementById('fNotiz').value.trim(),
+    quelle: item.file.name,
+    erfasstVon: currentUser.email,
+    erfasstAm: serverTimestamp(),
+    lat: markerA ? markerA.getLatLng().lat : null,
+    lng: markerA ? markerA.getLatLng().lng : null,
+    lat2: markerB ? markerB.getLatLng().lat : null,
+    lng2: markerB ? markerB.getLatLng().lng : null
+  };
+
+  if (payload.lat === null) {
+    toast('Bitte zuerst "Adresse(n) suchen" ausführen und Position prüfen.', true);
+    return;
+  }
+
+  saveBtn.disabled = true;
+  try {
+    await addDoc(collection(db, 'meldungen'), payload);
+    item.status = 'saved';
+    toast('Meldung gespeichert.');
+    renderQueue();
+  } catch (e) {
+    toast('Speichern fehlgeschlagen: ' + e.message, true);
+  }
+  saveBtn.disabled = !currentUser;
+});
+</script>
+</body>
+</html>
