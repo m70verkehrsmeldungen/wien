@@ -12,191 +12,199 @@
   :root{
     --bg:#12181f; --panel:#1b232c; --border:#2a343f;
     --text:#e8ecf1; --text-dim:#8b98a5; --accent:#e8a33d;
+    --cat-baustelle:#e8a33d; --cat-demo:#c94f9c; --cat-veranstaltung:#5b8def;
   }
   html,body{margin:0;height:100%;background:var(--bg);color:var(--text);
     font-family:-apple-system,'Segoe UI',Inter,Roboto,Arial,sans-serif;}
   #map{position:absolute;top:52px;bottom:0;left:0;right:0;}
-
-  header{
-    height:52px;display:flex;align-items:center;justify-content:space-between;
-    padding:0 16px;background:var(--panel);border-bottom:1px solid var(--border);
-    position:relative;z-index:1000;
-  }
+  header{height:52px;display:flex;align-items:center;justify-content:space-between;
+    padding:0 16px;background:var(--panel);border-bottom:1px solid var(--border);position:relative;z-index:1000;}
   header h1{font-size:15px;margin:0;font-weight:600;}
   header h1 span{color:var(--text-dim);font-weight:400;}
+  #countInfo{font-size:12px;color:var(--text-dim);}
 
-  #legend{
-    position:absolute;bottom:16px;left:16px;z-index:900;background:rgba(27,35,44,.92);
-    border:1px solid var(--border);border-radius:8px;padding:10px 12px;font-size:12px;
-    max-width:220px;
-  }
-  #legend .row{display:flex;align-items:center;gap:7px;margin:3px 0;cursor:pointer;user-select:none;}
-  #legend .dot{width:11px;height:11px;border-radius:50%;flex:none;}
-  #legend label{cursor:pointer;}
+  #legend{position:absolute;bottom:16px;left:16px;z-index:900;background:rgba(27,35,44,.94);
+    border:1px solid var(--border);border-radius:8px;padding:11px 13px;font-size:12px;max-width:230px;}
+  #legend .row{display:flex;align-items:center;gap:8px;margin:4px 0;}
+  #legend .icon-sample{width:18px;height:18px;flex:none;}
+  #legend hr{border:none;border-top:1px solid var(--border);margin:8px 0;}
+  #futureToggle{display:flex;align-items:center;gap:7px;font-size:12px;cursor:pointer;}
+  #futureToggle button{background:var(--panel);border:1px solid var(--border);color:var(--text);
+    border-radius:6px;padding:6px 10px;font-size:12px;cursor:pointer;width:100%;text-align:left;}
+  #futureToggle button.on{border-color:var(--accent);color:var(--accent);}
 
-  #toggleOld{margin-top:8px;padding-top:8px;border-top:1px solid var(--border);
-    display:flex;align-items:center;gap:6px;font-size:11.5px;color:var(--text-dim);}
-
-  .leaflet-popup-content{font-size:12.5px;line-height:1.5;}
+  .leaflet-popup-content{font-size:12.5px;line-height:1.55;max-width:260px;}
   .leaflet-popup-content b{color:#000;}
-  #loadingHint{position:absolute;top:60px;left:50%;transform:translateX(-50%);
+  .leaflet-popup-content .beschreibung{max-height:140px;overflow:auto;white-space:pre-wrap;
+    font-size:11px;color:#333;margin-top:6px;border-top:1px solid #ddd;padding-top:6px;}
+
+  #loadingHint{position:absolute;top:62px;left:50%;transform:translateX(-50%);
     background:var(--panel);border:1px solid var(--border);padding:8px 14px;border-radius:8px;
     font-size:13px;z-index:900;}
+  .future-layer{opacity:.45;}
 </style>
 </head>
 <body>
 
 <header>
   <h1>Verkehrsmeldungen <span>· Übersichtskarte</span></h1>
-  <span id="countInfo" style="font-size:12px;color:var(--text-dim);"></span>
+  <span id="countInfo"></span>
 </header>
 
 <div id="map"></div>
 <div id="loadingHint">Meldungen werden geladen …</div>
-
 <div id="legend"></div>
 
 <script type="module">
-/* Firebase-Konfiguration -- identisch zu eingabe.html, siehe README.md */
 const firebaseConfig = {
-  apiKey: "AIzaSyCK3Q-sl6aR1VkDPyqP_e_mdZU0NlMOoAY",
-  authDomain: "verkehrsmeldungen-1f4e1.firebaseapp.com",
-  projectId: "verkehrsmeldungen-1f4e1",
-  storageBucket: "verkehrsmeldungen-1f4e1.firebasestorage.app",
-  messagingSenderId: "83570069860",
-  appId: "1:83570069860:web:67f860507c11485e5b6a71"
+  apiKey: "HIER_EINTRAGEN",
+  authDomain: "HIER_EINTRAGEN.firebaseapp.com",
+  projectId: "HIER_EINTRAGEN",
+  storageBucket: "HIER_EINTRAGEN.appspot.com",
+  messagingSenderId: "HIER_EINTRAGEN",
+  appId: "HIER_EINTRAGEN"
 };
-
-import { initializeApp } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-app.js";
-import { getFirestore, collection, getDocs } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-firestore.js";
-
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+import { getFirestore, collection, getDocs } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
 
-const COLORS = {
-  'Baustelle': '#e8a33d',
-  'Kranarbeiten': '#e2574c',
-  'Straßensperre': '#c94f9c',
-  'Sportveranstaltung': '#4caf7d',
-  'Veranstaltung (Publikumsandrang)': '#5b8def',
-  'Umzug / Aufzug': '#9b6fe0',
-  'Verkehrsmeldung (allgemein)': '#8b98a5'
-};
+const CAT_COLORS = { 'Baustelle':'#e8a33d', 'Demonstration':'#c94f9c', 'Veranstaltung':'#5b8def' };
+
+/* ---- Kategorie-Icons: eigene, gut sichtbare Symbole je Kategorie ---- */
+function catIcon(kategorie, transparent) {
+  const color = CAT_COLORS[kategorie] || '#8b98a5';
+  const glyphs = {
+    'Baustelle': `<path d="M13 5 L23 22 H3 Z" fill="#12181f"/><rect x="11" y="10" width="4" height="6" fill="${color}"/><circle cx="13" cy="18.5" r="1.6" fill="${color}"/>`,
+    'Demonstration': `<path d="M7 12 L20 8 V17 L7 15 Z" fill="#12181f"/><rect x="4" y="11" width="3" height="5" fill="#12181f"/><line x1="8.5" y1="16" x2="8.5" y2="21" stroke="#12181f" stroke-width="1.6"/>`,
+    'Veranstaltung': `<path d="M13 5 L15.4 10.5 L21.5 11 L16.8 14.8 L18.3 20.7 L13 17.3 L7.7 20.7 L9.2 14.8 L4.5 11 L10.6 10.5 Z" fill="#12181f"/>`
+  };
+  const glyph = glyphs[kategorie] || '';
+  return L.divIcon({
+    className: transparent ? 'future-layer' : '',
+    html: `<svg width="30" height="38" viewBox="0 0 26 34" xmlns="http://www.w3.org/2000/svg">
+      <path d="M13 0C5.8 0 0 5.8 0 13c0 9.5 13 21 13 21s13-11.5 13-21C26 5.8 20.2 0 13 0z" fill="${color}" stroke="#12181f" stroke-width="1.3"/>
+      <circle cx="13" cy="13" r="9.5" fill="#fff"/>${glyph}</svg>`,
+    iconSize:[30,38], iconAnchor:[15,38], popupAnchor:[0,-34]
+  });
+}
 
 const map = L.map('map').setView([48.2082, 16.3738], 12);
 L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
   attribution: '&copy; OpenStreetMap-Mitwirkende'
 }).addTo(map);
 
-const layersByArt = {};        // art -> L.layerGroup
-const allEntries = [];
-let showOnlyCurrent = false;
+let allEntries = [];
+let showFuture = false;
+const layerGroup = L.layerGroup().addTo(map);
 
-function fmtDate(iso) {
-  if (!iso) return '';
-  const [y,m,d] = iso.split('-');
-  return `${d}.${m}.${y}`;
+function fmtD(iso){ if(!iso) return ''; const [y,m,d]=iso.split('-'); return `${d}.${m}.${y}`; }
+
+/* ---- Aktivitätsfenster: jeden Tag ab 06:00 und 18:00 für die
+   nächsten 13 Stunden -- feste Schicht-Fenster statt Live-"jetzt" ---- */
+function currentWindow() {
+  const now = new Date();
+  const boundary = new Date(now);
+  boundary.setMinutes(0,0,0);
+  const hour = now.getHours();
+  if (hour >= 18) boundary.setHours(18);
+  else if (hour >= 6) boundary.setHours(6);
+  else { boundary.setDate(boundary.getDate()-1); boundary.setHours(18); }
+  const end = new Date(boundary.getTime() + 13*3600*1000);
+  return { start: boundary, end };
+}
+
+function entryInterval(e) {
+  const start = new Date(e.datumVon + 'T' + (e.zeitVon || '00:00'));
+  const end = new Date((e.datumBis || e.datumVon) + 'T' + (e.zeitBis || '23:59'));
+  return { start, end };
 }
 
 function popupHtml(d) {
-  const zeitraum = d.datumVon === d.datumBis || !d.datumBis
-    ? fmtDate(d.datumVon)
-    : `${fmtDate(d.datumVon)} – ${fmtDate(d.datumBis)}`;
-  const zeit = d.zeitVon ? `, ${d.zeitVon}${d.zeitBis ? '–' + d.zeitBis : ''} Uhr` : '';
-  return `<b>${d.ort}${d.ortBis ? ' – ' + d.ortBis : ''}</b><br>
-    ${d.art}<br>
-    ${zeitraum}${zeit}<br>
-    ${d.gz ? 'GZ: ' + d.gz + '<br>' : ''}
-    ${d.notiz ? d.notiz + '<br>' : ''}
-    <span style="color:#888;font-size:11px;">Quelle: ${d.quelle || '–'}</span>`;
+  const zeitraum = d.datumVon === d.datumBis || !d.datumBis ? fmtD(d.datumVon) : `${fmtD(d.datumVon)} – ${fmtD(d.datumBis)}`;
+  const zeit = d.zeitVon ? `, ${d.zeitVon}${d.zeitBis?'–'+d.zeitBis:''} Uhr` : '';
+  return `<b>${d.ort}${d.ortBis?' – '+d.ortBis:''}</b><br>
+    ${d.kategorie}<br>${zeitraum}${zeit}<br>
+    ${d.gz ? 'GZ: '+d.gz+'<br>' : ''}${d.notiz ? '<em>'+d.notiz+'</em><br>' : ''}
+    <span style="color:#888;font-size:11px;">Quelle: ${d.quelle||'–'}</span>
+    ${d.beschreibung ? '<div class="beschreibung">'+escapeHtml(d.beschreibung)+'</div>' : ''}`;
 }
+function escapeHtml(s){ return s.replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
 
-function isCurrent(d) {
-  if (!d.datumBis) return true;
-  const today = new Date().toISOString().slice(0,10);
-  return d.datumBis >= today;
-}
+function render() {
+  layerGroup.clearLayers();
+  const win = currentWindow();
+  const now = new Date();
+  let shown = 0;
 
-function addEntry(d) {
-  allEntries.push(d);
-  const color = COLORS[d.art] || COLORS['Verkehrsmeldung (allgemein)'];
-  if (!layersByArt[d.art]) {
-    layersByArt[d.art] = L.layerGroup().addTo(map);
-  }
-  const group = layersByArt[d.art];
+  allEntries.forEach(e => {
+    const { start, end } = entryInterval(e);
+    if (end < now) return; // vorbei -> nie anzeigen (automatisches Verschwinden)
+    const isActiveNow = start <= win.end && end >= win.start; // überschneidet aktuelles Schichtfenster
+    const isFuture = start > win.end;
+    if (!isActiveNow && !(isFuture && showFuture)) return;
 
-  const layers = [];
-  if (d.lat && d.lng) {
-    const m1 = L.circleMarker([d.lat, d.lng], { radius:7, color, fillColor:color, fillOpacity:.85, weight:2 })
-      .bindPopup(popupHtml(d));
-    layers.push(m1);
-  }
-  if (d.lat2 && d.lng2) {
-    const m2 = L.circleMarker([d.lat2, d.lng2], { radius:7, color, fillColor:color, fillOpacity:.85, weight:2 })
-      .bindPopup(popupHtml(d));
-    layers.push(m2);
-    if (d.lat && d.lng) {
-      layers.push(L.polyline([[d.lat,d.lng],[d.lat2,d.lng2]], { color, weight:4, opacity:.75 }));
+    const transparent = isFuture;
+    const icon = catIcon(e.kategorie, transparent);
+    shown++;
+
+    if (e.route && e.route.length >= 2) {
+      const line = L.polyline(e.route.map(p => [p.lat,p.lng]),
+        { color: CAT_COLORS[e.kategorie], weight:4, opacity: transparent?0.35:0.85 }).addTo(layerGroup);
+      line.bindPopup(popupHtml(e));
+      L.marker([e.route[0].lat, e.route[0].lng], { icon }).addTo(layerGroup).bindPopup(popupHtml(e));
+    } else if (e.lat && e.lng) {
+      L.marker([e.lat, e.lng], { icon }).addTo(layerGroup).bindPopup(popupHtml(e));
+      if (e.lat2 && e.lng2) {
+        L.marker([e.lat2, e.lng2], { icon }).addTo(layerGroup).bindPopup(popupHtml(e));
+        L.polyline([[e.lat,e.lng],[e.lat2,e.lng2]],
+          { color: CAT_COLORS[e.kategorie], weight:4, opacity: transparent?0.35:0.85 }).addTo(layerGroup);
+      }
     }
-  }
-  layers.forEach(l => { l._meldung = d; group.addLayer(l); });
-}
-
-function applyFilter() {
-  Object.values(layersByArt).flat === undefined; // no-op guard
-  Object.entries(layersByArt).forEach(([art, group]) => {
-    group.eachLayer(l => {
-      const d = l._meldung;
-      const visible = !showOnlyCurrent || isCurrent(d);
-      const onMap = map.hasLayer(l);
-      if (visible && !onMap) group.addLayer(l);
-      if (!visible && onMap) group.removeLayer(l);
-    });
   });
+  document.getElementById('countInfo').textContent = shown + ' angezeigt · ' + allEntries.length + ' gesamt';
 }
 
 function buildLegend() {
   const el = document.getElementById('legend');
   el.innerHTML = '';
-  Object.keys(COLORS).forEach(art => {
-    if (!layersByArt[art]) return;
+  Object.keys(CAT_COLORS).forEach(kat => {
     const row = document.createElement('div');
     row.className = 'row';
-    row.innerHTML = `<span class="dot" style="background:${COLORS[art]}"></span>
-      <input type="checkbox" checked id="chk_${art}"> <label for="chk_${art}">${art}</label>`;
-    row.querySelector('input').addEventListener('change', (e) => {
-      if (e.target.checked) map.addLayer(layersByArt[art]);
-      else map.removeLayer(layersByArt[art]);
-    });
+    const icon = catIcon(kat, false);
+    row.innerHTML = `<span class="icon-sample">${icon.options.html}</span><span>${kat}</span>`;
     el.appendChild(row);
   });
-  const toggle = document.createElement('div');
-  toggle.id = 'toggleOld';
-  toggle.innerHTML = `<input type="checkbox" id="chkCurrent"> <label for="chkCurrent">nur aktuelle/kommende anzeigen</label>`;
-  toggle.querySelector('input').addEventListener('change', (e) => {
-    showOnlyCurrent = e.target.checked;
-    applyFilter();
+  el.insertAdjacentHTML('beforeend', '<hr>');
+  const toggleWrap = document.createElement('div');
+  toggleWrap.id = 'futureToggle';
+  toggleWrap.innerHTML = `<button id="futureBtn">Zukünftige Meldungen einblenden</button>`;
+  el.appendChild(toggleWrap);
+  document.getElementById('futureBtn').addEventListener('click', (e) => {
+    showFuture = !showFuture;
+    e.target.classList.toggle('on', showFuture);
+    e.target.textContent = showFuture ? 'Zukünftige Meldungen ausblenden' : 'Zukünftige Meldungen einblenden';
+    render();
   });
-  el.appendChild(toggle);
 }
 
 async function load() {
   const snap = await getDocs(collection(db, 'meldungen'));
-  snap.forEach(doc => addEntry(doc.data()));
+  allEntries = [];
+  snap.forEach(doc => allEntries.push(doc.data()));
   document.getElementById('loadingHint').style.display = 'none';
-  document.getElementById('countInfo').textContent = allEntries.length + ' Meldungen';
   buildLegend();
-
-  const allLayers = Object.values(layersByArt);
-  if (allEntries.length) {
-    const group = L.featureGroup(allLayers.flatMap(g => g.getLayers()));
-    if (group.getLayers().length) map.fitBounds(group.getBounds(), { padding:[30,30] });
+  render();
+  const withCoords = allEntries.filter(e => e.lat && e.lng);
+  if (withCoords.length) {
+    const bounds = L.latLngBounds(withCoords.map(e => [e.lat, e.lng]));
+    map.fitBounds(bounds, { padding:[30,30] });
   }
 }
+load().catch(e => { document.getElementById('loadingHint').textContent = 'Fehler beim Laden: ' + e.message; });
 
-load().catch(e => {
-  document.getElementById('loadingHint').textContent = 'Fehler beim Laden: ' + e.message;
-});
+// Anzeige alle 60 Sekunden neu bewerten (Schichtwechsel 06:00/18:00, automatisches Verschwinden)
+setInterval(render, 60000);
 </script>
 </body>
 </html>
